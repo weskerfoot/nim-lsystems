@@ -11,19 +11,30 @@ type Terms = seq[Term]
 proc rewrite(terms: Terms, maxIterations: int) : Terms =
   var currentTerms: Terms = terms
   var newTerms: Terms
-  var n = 0
-  
-  while true:
-    n += 1
+
+  for _ in repeat(0, maxIterations):
     # Reset this each iteration to gather new expansions
     newTerms = @[]
     for term in currentTerms:
       case term:
-        of LeafTerm: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft, LeafTerm]
+        of LeafTerm:
+          case sample(toSeq(0..15)):
+            of 0..10: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft, LeafTerm]
+            of 11..12: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, PopTerm, GoLeft, LeafTerm]
+            of 13..15: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft]
+            else:
+              continue
+
         else: newTerms &= @[term]
     currentTerms = newTerms
-    if n == maxIterations:
-      return currentTerms
+
+  # Add a trunk proportional to the number of iterations
+  # Maybe should be proportional to the total magnitude of the entire thing somehow?
+  for _ in repeat(0, maxIterations):
+    currentTerms = @[LineTerm] & currentTerms
+
+  return currentTerms
+
     
 type StackControl = enum Push, Pop
 
@@ -51,17 +62,18 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
   let termsToConvert = rewrite(axiom, maxIterations)
   var angle_delta: float64 = angle
   var magnitudes: seq[float64] = @[magnitude]
-  var widths: seq[float64] = @[maxIterations.float64 + 3]
+  var widths: seq[float64] = @[maxIterations.float64]
   var current_magnitude = magnitude
   var current_width: float64 = widths[0]
   # axiom
   yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(angle_change: 180, magnitude: magnitude))
+
   for term in termsToConvert:
-    let angle_delta = angle_delta * sample(@[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
+    let angle_delta = angle_delta * sample(@[1.0, 1.0, 0.9])
     case term:
       of LeafTerm:
         # when there's a leaf we want to make the magnitude smaller
-        let leaf_width = (10 * sample(@[0.50, 0.10, 0.25]))
+        let leaf_width = (16 * sample(@[1.2, 1.0, 0.50]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: angle_delta, magnitude: magnitudes[0]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: 0, magnitude: -magnitudes[0])) # hack
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: -(angle_delta*2), magnitude: magnitudes[0]))
@@ -72,7 +84,7 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
       # L-systems don't go "backwards"
       # So you can go left or right on the x-axis at a given angle delta
       of GoLeft:
-        current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.01]))
+        current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.10]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: angle_delta, magnitude: current_magnitude))
       of GoRight:
@@ -99,6 +111,7 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
 type Position = object
   x: float64
   y: float64
+  mid: Vector2
   angle: float64
 
 proc `$` (p: Position): string =
@@ -107,6 +120,7 @@ proc `$` (p: Position): string =
 # Line (along with the angle relative to origin
 type DrawLine = object
   start_pos: Vector2
+  mid_pos: Vector2
   end_pos: Vector2
   width: float64
   angle: float64
@@ -130,6 +144,8 @@ proc calculateNextLine(inst: DrawInstruction, pos: Position) : DrawLine =
 
   # Ending position is relative to the starting position, so add the coordinates
   result.end_pos = Vector2(x: result.start_pos.x+new_x, y: result.start_pos.y+new_y)
+  result.mid_pos = Vector2(x: result.start_pos.x, y: result.end_pos.y)
+
   result.width = inst.width
   result.color = inst.color
   result.angle = new_angle
@@ -162,6 +178,7 @@ proc executeProgram(instructions: seq[Instruction], starting_pos: Position) : se
         nextLine = calculateNextLine(inst.drawInstruction, current_pos)
         let new_position = Position(x: nextLine.end_pos.x,
                                     y: nextLine.end_pos.y,
+                                    mid: nextLine.mid_pos,
                                     angle: nextLine.angle)
         # leave the stack alone, set the current position however
 
@@ -256,6 +273,7 @@ proc guiLoop*() =
     # This must come before anything else!
     ClearBackground(BLACK)
     for line in drawLines:
+      #DrawLineBezierQuad(line.start_pos, line.end_pos, line.mid_pos, line.width, line.color)
       DrawLineEx(line.start_pos, line.end_pos, line.width, line.color)
 
     EndDrawing()

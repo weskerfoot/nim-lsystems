@@ -128,6 +128,7 @@ type TreeLocation = object
   iterationNumber: int
   startingMagnitude: float64
   startingPosition: StartingPosition
+  startingColor: Color
 
 proc `$` (p: StartingPosition): string =
   return "x = " & $p.x & ", y = " & $p.y & ", angle = " & $p.angle
@@ -239,6 +240,7 @@ proc guiLoop*() =
   var rotation: float32 = 0
   var camera_x_offset = screenWidth/2
   var camera_y_offset = screenHeight/2
+  var color: Color = DARKGREEN
 
   var camera: Camera2D
 
@@ -251,34 +253,37 @@ proc guiLoop*() =
   while not WindowShouldClose():
     BeginDrawing()
 
-    restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 100.float32, height: 20.float32), "Restart".cstring)
-    clearForest = GuiButton(Rectangle(x: 0.float32, y: 40.float32, width: 100.float32, height: 20.float32), "Clear".cstring)
+    restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 200.float32, height: 50.float32), "Restart".cstring)
+    clearForest = GuiButton(Rectangle(x: 0.float32, y: 70.float32, width: 200.float32, height: 50.float32), "Clear".cstring)
 
-    let iterationsBox = Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32)
-    let magnitudeBox = Rectangle(x: 0.float32, y: 80.float32, width: 100.float32, height: 20.float32)
-    let angleBox = Rectangle(x: 0.float32, y: 100.float32, width: 100.float32, height: 20.float32)
+    let iterationsBox = Rectangle(x: 0.float32, y: 120.float32, width: 200.float32, height: 50.float32)
+    let magnitudeBox = Rectangle(x: 0.float32, y: 170.float32, width: 200.float32, height: 50.float32)
+    let angleBox = Rectangle(x: 0.float32, y: 220.float32, width: 200.float32, height: 50.float32)
+    let colorPickerBox = Rectangle(x: 0.float32, y: 270.float32, width: 200.float32, height: 50.float32)
     let mouseVector = Vector2(x: GetMouseX().float64, y: GetMouseY().float64)
 
     GuiValueBox(bounds=iterationsBox,
-                text="Iterations",
+                text="Iterations".cstring,
                 value=iterations.addr,
                 minValue=1,
                 maxValue=15,
                 editMode=CheckCollisionPointRec(mouseVector, iterationsBox))
 
     GuiValueBox(bounds=magnitudeBox,
-                text="Size",
+                text="Size".cstring,
                 value=magnitude.addr,
                 minValue=1,
                 maxValue=100,
                 editMode=CheckCollisionPointRec(mouseVector, magnitudeBox))
 
     GuiValueBox(bounds=angleBox,
-                text="Angle",
+                text="Angle".cstring,
                 value=angle.addr,
                 minValue=1,
                 maxValue=360,
                 editMode=CheckCollisionPointRec(mouseVector, angleBox))
+
+    color = GuiColorPicker(colorPickerBox, color)
 
     if IsKeyDown(KEY_DOWN) and IsKeyDown(KEY_LEFT_CONTROL):
       zoom -= 0.01
@@ -308,6 +313,7 @@ proc guiLoop*() =
     camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
 
     if IsKeyDown(KEY_LEFT_CONTROL) and IsMouseButtonPressed(MOUSE_LEFT_BUTTON):
+      # Save and place an object
       let newPositionVector = GetScreenToWorld2D(Vector2(x: mouseVector.x, y: mouseVector.y), camera)
       let newPosition = StartingPosition(x: newPositionVector.x, y: newPositionVector.y, angle: 90)
 
@@ -315,16 +321,21 @@ proc guiLoop*() =
       treeLocations &= @[TreeLocation(startingPosition: newPosition,
                                       iterationAngle: angle.float32,
                                       iterationNumber: iterations,
-                                      startingMagnitude: magnitude.float64)]
+                                      startingMagnitude: magnitude.float64,
+                                      startingColor: color)]
 
-      let newInstructions = toSeq(axiomToInstructions(iterations, magnitude.float64, angle.float64))
+      let newInstructions = toSeq(axiomToInstructions(iterations, magnitude.float64, angle.float64, color))
       drawLinesList &= @[executeProgram(newInstructions, newPosition)]
 
     if restartSimulation:
       echo "Re-executing"
       drawLinesList = @[]
       for tree in treeLocations:
-        let instructions = toSeq(axiomToInstructions(tree.iterationNumber, tree.startingMagnitude, tree.iterationAngle))
+        let instructions = toSeq(axiomToInstructions(tree.iterationNumber,
+                                                     tree.startingMagnitude,
+                                                     tree.iterationAngle,
+                                                     tree.startingColor))
+
         drawLinesList &= @[executeProgram(instructions, tree.startingPosition)]
 
     if clearForest:

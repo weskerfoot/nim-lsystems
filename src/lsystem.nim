@@ -327,9 +327,6 @@ proc guiLoop*() =
       instructionLists = @[]
       startingPositions = @[]
 
-    screenWidth = (monitor.GetMonitorWidth() / 2).int
-    screenHeight = (monitor.GetMonitorHeight() / 2).int
-
     # Make sure to clear the background before drawing
     ClearBackground(BLACK)
 

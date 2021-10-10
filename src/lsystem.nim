@@ -19,6 +19,8 @@ proc rewrite(terms: Terms, maxIterations: int) : Terms =
       case term:
         of LeafTerm:
           case sample(toSeq(0..15)):
+            # Instead of using sample, make it a markov chain grammar
+            # Allow defining a set of productions that choose randomly
             of 0..10: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft, LeafTerm]
             of 11..12: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, PopTerm, GoLeft, LeafTerm]
             of 13..15: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft]
@@ -32,9 +34,7 @@ proc rewrite(terms: Terms, maxIterations: int) : Terms =
   # Maybe should be proportional to the total magnitude of the entire thing somehow?
   for _ in repeat(0, maxIterations):
     currentTerms = @[LineTerm] & currentTerms
-
   return currentTerms
-
     
 type StackControl = enum Push, Pop
 
@@ -70,13 +70,16 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
   yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(angle_change: 180, magnitude: magnitude))
 
   for term in termsToConvert:
+    # TODO make this definable by the grammar and/or tweakable
     let angle_delta = angle_delta * sample(@[1.0, 1.0, 0.9])
     case term:
       of LeafTerm:
         # when there's a leaf we want to make the magnitude smaller
+        # TODO make this definable by the grammar and/or tweakable
         let leaf_width = (16 * sample(@[1.2, 1.0, 0.50]))
 
-        currentLeafColor.r += (sample(@[1, 2, -1, -2, 3]).uint8)
+        # TODO make this definable by the grammar and/or tweakable
+        currentLeafColor.r += (sample(@[5, 2, 10, -1, -2, 3]).uint8)
 
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: angle_delta, magnitude: magnitudes[0]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: 0, magnitude: -magnitudes[0])) # hack
@@ -88,10 +91,12 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
       # L-systems don't go "backwards"
       # So you can go left or right on the x-axis at a given angle delta
       of GoLeft:
+        # TODO make this definable by the grammar and/or tweakable
         current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.10]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: angle_delta, magnitude: current_magnitude))
       of GoRight:
+        # TODO make this definable by the grammar and/or tweakable
         current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.01]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: -angle_delta, magnitude: current_magnitude))
@@ -112,14 +117,20 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
         yield Instruction(kind: pkStack, stackInstruction: Pop)
 
 # A Position along with its angle
-type Position = object
+type StartingPosition = object
   x: float64
   y: float64
   mid: Vector2
-  angle: float64
+  angle: float64 # Defines which direction it will start in
 
-proc `$` (p: Position): string =
-  return "x = " & $p.x & ", " & "y = " & $p.y & ", " & "angle = " & $p.angle
+type TreeLocation = object
+  iterationAngle: float64
+  iterationNumber: int
+  startingMagnitude: float64
+  startingPosition: StartingPosition
+
+proc `$` (p: StartingPosition): string =
+  return "x = " & $p.x & ", y = " & $p.y & ", angle = " & $p.angle
 
 # Line (along with the angle relative to origin
 type DrawLine = object
@@ -133,7 +144,7 @@ type DrawLine = object
 proc `$` (d: DrawLine): string =
   return "start_pos = " & $d.start_pos & ", " & "end_pos = " & $d.end_pos
 
-proc calculateNextLine(inst: DrawInstruction, pos: Position) : DrawLine =
+proc calculateNextLine(inst: DrawInstruction, pos: StartingPosition) : DrawLine =
   # Change the angle
   let new_angle = inst.angle_change + pos.angle
 
@@ -154,7 +165,7 @@ proc calculateNextLine(inst: DrawInstruction, pos: Position) : DrawLine =
   result.color = inst.color
   result.angle = new_angle
 
-proc executeProgram(instructions: seq[Instruction], starting_pos: Position) : seq[DrawLine] =
+proc executeProgram(instructions: seq[Instruction], starting_pos: StartingPosition) : seq[DrawLine] =
   # each instruction will be followed by a stack control instruction
   var insts = instructions
   var positions = @[starting_pos]
@@ -180,10 +191,10 @@ proc executeProgram(instructions: seq[Instruction], starting_pos: Position) : se
           continue
       of pkDraw:
         nextLine = calculateNextLine(inst.drawInstruction, current_pos)
-        let new_position = Position(x: nextLine.end_pos.x,
-                                    y: nextLine.end_pos.y,
-                                    mid: nextLine.mid_pos,
-                                    angle: nextLine.angle)
+        let new_position = StartingPosition(x: nextLine.end_pos.x,
+                                            y: nextLine.end_pos.y,
+                                            mid: nextLine.mid_pos,
+                                            angle: nextLine.angle)
         # leave the stack alone, set the current position however
 
         draw_lines = draw_lines & @[nextLine]
@@ -222,9 +233,11 @@ proc guiLoop*() =
   var magnitude: float64 = 10
   var angle: float64 = 30
   var iterations = 2
+
   var startingPosition_x: float32 = screenWidth/2
   var startingPosition_y: float32 = screenHeight.float32
-  var startingPositions: seq[Position] = @[]
+  var treeLocations: seq[TreeLocation] = @[]
+
   var instructionLists: seq[seq[Instruction]] = @[]
   var drawLinesList: seq[seq[DrawLine]] = @[]
   var zoom: float32 = 1
@@ -246,8 +259,12 @@ proc guiLoop*() =
     restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 100.float32, height: 20.float32), "Restart".cstring)
     clearForest = GuiButton(Rectangle(x: 0.float32, y: 40.float32, width: 100.float32, height: 20.float32), "Clear".cstring)
 
-    let fewerIterations = GuiButton(Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32), "Fewer".cstring)
-    let moreIterations = GuiButton(Rectangle(x: 0.float32, y: 80.float32, width: 100.float32, height: 20.float32), "More".cstring)
+    GuiValueBox(bounds=Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32),
+                text="Iterations",
+                value=iterations.addr,
+                minValue=1,
+                maxValue=15,
+                editMode=true)
 
     magnitude = GuiSliderBar(Rectangle(
                                     x: 0.float32,
@@ -295,22 +312,18 @@ proc guiLoop*() =
 
     camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
 
-
-    if fewerIterations:
-      if iterations > 1:
-        iterations -= 1
-      restartSimulation = true
-    if moreIterations:
-      restartSimulation = true
-      iterations += 1
-
     if IsKeyDown(KEY_LEFT_CONTROL) and IsMouseButtonPressed(MOUSE_LEFT_BUTTON):
       startingPosition_x = GetMouseX().float32
       startingPosition_y = GetMouseY().float32
 
       let newPositionVector = GetScreenToWorld2D(Vector2(x: startingPosition_x, y: startingPosition_y), camera)
-      let newPosition = Position(x: newPositionVector.x, y: newPositionVector.y, angle: 90)
-      startingPositions &= @[newPosition]
+      let newPosition = StartingPosition(x: newPositionVector.x, y: newPositionVector.y, angle: 90)
+
+      # Store the location of the tree and its starting attributes
+      treeLocations &= @[TreeLocation(startingPosition: newPosition,
+                                      iterationAngle: angle,
+                                      iterationNumber: iterations,
+                                      startingMagnitude: magnitude)]
 
       let newInstructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
       drawLinesList &= @[executeProgram(newInstructions, newPosition)]
@@ -318,14 +331,14 @@ proc guiLoop*() =
     if restartSimulation:
       echo "Re-executing"
       drawLinesList = @[]
-      for startingPosition in startingPositions:
-        let instructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
-        drawLinesList &= @[executeProgram(instructions, startingPosition)]
+      for tree in treeLocations:
+        let instructions = toSeq(axiomToInstructions(tree.iterationNumber, tree.startingMagnitude, tree.iterationAngle))
+        drawLinesList &= @[executeProgram(instructions, tree.startingPosition)]
 
     if clearForest:
       drawLinesList = @[]
       instructionLists = @[]
-      startingPositions = @[]
+      treeLocations = @[]
 
     # Make sure to clear the background before drawing
     ClearBackground(BLACK)

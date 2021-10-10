@@ -11,19 +11,30 @@ type Terms = seq[Term]
 proc rewrite(terms: Terms, maxIterations: int) : Terms =
   var currentTerms: Terms = terms
   var newTerms: Terms
-  var n = 0
-  
-  while true:
-    n += 1
+
+  for _ in repeat(0, maxIterations):
     # Reset this each iteration to gather new expansions
     newTerms = @[]
     for term in currentTerms:
       case term:
-        of LeafTerm: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft, LeafTerm]
+        of LeafTerm:
+          case sample(toSeq(0..15)):
+            of 0..10: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft, LeafTerm]
+            of 11..12: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, PopTerm, GoLeft, LeafTerm]
+            of 13..15: newTerms &= @[LineTerm, LineTerm, PushTerm, GoRight, LeafTerm, PopTerm, GoLeft]
+            else:
+              continue
+
         else: newTerms &= @[term]
     currentTerms = newTerms
-    if n == maxIterations:
-      return currentTerms
+
+  # Add a trunk proportional to the number of iterations
+  # Maybe should be proportional to the total magnitude of the entire thing somehow?
+  for _ in repeat(0, maxIterations):
+    currentTerms = @[LineTerm] & currentTerms
+
+  return currentTerms
+
     
 type StackControl = enum Push, Pop
 
@@ -46,25 +57,30 @@ proc `$` (i: Instruction): string =
     of pkDraw: return "angle_change = " & $i.drawInstruction.angle_change & ", magnitude = " & $i.drawInstruction.magnitude
     of pkStack: return "direction = " & $i.stackInstruction
 
-iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: float64) : Instruction =
+iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: float64, leafColor: Color = DARKGREEN) : Instruction =
+  var currentLeafColor = leafColor
   let axiom = @[LeafTerm]
   let termsToConvert = rewrite(axiom, maxIterations)
   var angle_delta: float64 = angle
   var magnitudes: seq[float64] = @[magnitude]
-  var widths: seq[float64] = @[maxIterations.float64 + 3]
+  var widths: seq[float64] = @[maxIterations.float64]
   var current_magnitude = magnitude
   var current_width: float64 = widths[0]
   # axiom
   yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(angle_change: 180, magnitude: magnitude))
+
   for term in termsToConvert:
-    let angle_delta = angle_delta * sample(@[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1])
+    let angle_delta = angle_delta * sample(@[1.0, 1.0, 0.9])
     case term:
       of LeafTerm:
         # when there's a leaf we want to make the magnitude smaller
-        let leaf_width = (10 * sample(@[0.50, 0.10, 0.25]))
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: angle_delta, magnitude: magnitudes[0]))
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: 0, magnitude: -magnitudes[0])) # hack
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKGREEN, width: leaf_width, angle_change: -(angle_delta*2), magnitude: magnitudes[0]))
+        let leaf_width = (16 * sample(@[1.2, 1.0, 0.50]))
+
+        currentLeafColor.r += (sample(@[1, 2, -1, -2, 3]).uint8)
+
+        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: angle_delta, magnitude: magnitudes[0]))
+        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: 0, magnitude: -magnitudes[0])) # hack
+        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: -(angle_delta*2), magnitude: magnitudes[0]))
       of LineTerm:
         # Draw without changing direction
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: 0, magnitude: magnitudes[0]))
@@ -72,7 +88,7 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
       # L-systems don't go "backwards"
       # So you can go left or right on the x-axis at a given angle delta
       of GoLeft:
-        current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.01]))
+        current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.10]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
         yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: angle_delta, magnitude: current_magnitude))
       of GoRight:
@@ -99,6 +115,7 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
 type Position = object
   x: float64
   y: float64
+  mid: Vector2
   angle: float64
 
 proc `$` (p: Position): string =
@@ -107,6 +124,7 @@ proc `$` (p: Position): string =
 # Line (along with the angle relative to origin
 type DrawLine = object
   start_pos: Vector2
+  mid_pos: Vector2
   end_pos: Vector2
   width: float64
   angle: float64
@@ -130,6 +148,8 @@ proc calculateNextLine(inst: DrawInstruction, pos: Position) : DrawLine =
 
   # Ending position is relative to the starting position, so add the coordinates
   result.end_pos = Vector2(x: result.start_pos.x+new_x, y: result.start_pos.y+new_y)
+  result.mid_pos = Vector2(x: result.start_pos.x, y: result.end_pos.y)
+
   result.width = inst.width
   result.color = inst.color
   result.angle = new_angle
@@ -162,6 +182,7 @@ proc executeProgram(instructions: seq[Instruction], starting_pos: Position) : se
         nextLine = calculateNextLine(inst.drawInstruction, current_pos)
         let new_position = Position(x: nextLine.end_pos.x,
                                     y: nextLine.end_pos.y,
+                                    mid: nextLine.mid_pos,
                                     angle: nextLine.angle)
         # leave the stack alone, set the current position however
 
@@ -187,57 +208,94 @@ proc guiLoop*() =
   SetWindowTitle("L-Systems")
   MaximizeWindow()
 
-  #GuiLoadStyle("styles/terminal/terminal.rgs")
-
   var mousePos = Vector2(x: 0, y: 0)
   var windowPos = Vector2(x: screenWidth.float64, y: screenHeight.float64)
   var panOffset = mousePos
 
-  var dragWindow = false
-  var restartSimulation = false
-
-  var restartButton = false
-
-  var magnitude: float64 = 10
-  var angle: float64 = 30
-
   SetTargetFPS(60)
 
+  # Control variables
+  var dragWindow = false
+  var restartSimulation = false
+  var clearForest = false
+  var restartButton = false
+  var magnitude: float64 = 10
+  var angle: float64 = 30
   var iterations = 2
+  var startingPosition_x: float32 = screenWidth/2
+  var startingPosition_y: float32 = screenHeight.float32
+  var startingPositions: seq[Position] = @[]
+  var instructionLists: seq[seq[Instruction]] = @[]
+  var drawLinesList: seq[seq[DrawLine]] = @[]
+  var zoom: float32 = 1
+  var rotation: float32 = 0
+  var camera_x_offset = screenWidth/2
+  var camera_y_offset = screenHeight/2
 
-  # "axiom"
-  let startingPosition = Position(x: screenWidth/2, y: screenHeight.float64, angle: 90)
-  var instructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
-  for inst in instructions:
-    echo inst
-  var drawLines = executeProgram(instructions, startingPosition)
+  var camera: Camera2D
+
+  camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
+  camera.target = Vector2(x: screenWidth/2, y: screenHeight/2)
+
+  camera.rotation = rotation
+  camera.zoom = zoom
+
   while not WindowShouldClose():
     BeginDrawing()
 
-    restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 0.float32, width: 100.float32, height: 20.float32), "Restart".cstring)
+    restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 100.float32, height: 20.float32), "Restart".cstring)
+    clearForest = GuiButton(Rectangle(x: 0.float32, y: 40.float32, width: 100.float32, height: 20.float32), "Clear".cstring)
 
-    let fewerIterations = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 100.float32, height: 20.float32), "Fewer".cstring)
-    let moreIterations = GuiButton(Rectangle(x: 0.float32, y: 40.float32, width: 100.float32, height: 20.float32), "More".cstring)
+    let fewerIterations = GuiButton(Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32), "Fewer".cstring)
+    let moreIterations = GuiButton(Rectangle(x: 0.float32, y: 80.float32, width: 100.float32, height: 20.float32), "More".cstring)
 
     magnitude = GuiSliderBar(Rectangle(
                                     x: 0.float32,
-                                    y: 60.float32,
+                                    y: 100.float32,
                                     width: 80.float32,
                                     height: 20.float32),
-                                  "Smaller",
-                                  "Larger",
-                                  magnitude,
-                                  10, 100)
+                                    "Smaller",
+                                    "Larger",
+                                    magnitude,
+                                    10, 100)
 
-    angle = GuiSliderBar(Rectangle(
-                                    x: 0.float32,
-                                    y: 90.float32,
-                                    width: 80.float32,
-                                    height: 20.float32),
+    angle = GuiSliderBar(Rectangle(x: 0.float32,
+                                   y: 120.float32,
+                                   width: 80.float32,
+                                   height: 20.float32),
                                   "Narrower",
                                   "Wider",
-                                  angle,
-                                  1, 45)
+                                   angle,
+                                   1, 360)
+
+    if IsKeyDown(KEY_DOWN) and IsKeyDown(KEY_LEFT_CONTROL):
+      zoom -= 0.01
+    if IsKeyDown(KEY_UP) and IsKeyDown(KEY_LEFT_CONTROL):
+      zoom += 0.01
+
+    if IsKeyDown(KEY_LEFT) and IsKeyDown(KEY_LEFT_CONTROL) and rotation < 360:
+      rotation += 1
+    if IsKeyDown(KEY_RIGHT) and IsKeyDown(KEY_LEFT_CONTROL) and rotation > -360:
+      rotation -= 1
+
+    camera.zoom = zoom
+    camera.rotation = rotation
+
+    if GetMouseX() <= 0:
+      camera_x_offset += 5
+
+    if GetMouseX() >= (GetScreenWidth() - 10):
+      camera_x_offset -= 5
+
+    if GetMouseY() <= 10:
+      camera_y_offset += 5
+
+    if GetMouseY() >= (GetScreenHeight() - 10):
+      camera_y_offset -= 5
+
+    camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
+
+
     if fewerIterations:
       if iterations > 1:
         iterations -= 1
@@ -246,19 +304,44 @@ proc guiLoop*() =
       restartSimulation = true
       iterations += 1
 
+    if IsKeyDown(KEY_LEFT_CONTROL) and IsMouseButtonPressed(MOUSE_LEFT_BUTTON):
+      startingPosition_x = GetMouseX().float32
+      startingPosition_y = GetMouseY().float32
+
+      let newPositionVector = GetScreenToWorld2D(Vector2(x: startingPosition_x, y: startingPosition_y), camera)
+      let newPosition = Position(x: newPositionVector.x, y: newPositionVector.y, angle: 90)
+      startingPositions &= @[newPosition]
+
+      let newInstructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
+      drawLinesList &= @[executeProgram(newInstructions, newPosition)]
+
     if restartSimulation:
       echo "Re-executing"
-      instructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
-      drawLines = executeProgram(instructions, startingPosition)
+      drawLinesList = @[]
+      for startingPosition in startingPositions:
+        let instructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
+        drawLinesList &= @[executeProgram(instructions, startingPosition)]
+
+    if clearForest:
+      drawLinesList = @[]
+      instructionLists = @[]
+      startingPositions = @[]
 
     screenWidth = (monitor.GetMonitorWidth() / 2).int
     screenHeight = (monitor.GetMonitorHeight() / 2).int
-    # This must come before anything else!
-    ClearBackground(BLACK)
-    for line in drawLines:
-      DrawLineEx(line.start_pos, line.end_pos, line.width, line.color)
 
+    # Make sure to clear the background before drawing
+    ClearBackground(BLACK)
+
+    # Only want the camera to apply to drawn stuff, not controls
+    BeginMode2D(camera)
+    for drawLines in drawLinesList:
+      for line in drawLines:
+        DrawLineEx(line.start_pos, line.end_pos, line.width, line.color)
+
+    EndMode2D()
     EndDrawing()
+
   CloseWindow()
 
 when isMainModule:

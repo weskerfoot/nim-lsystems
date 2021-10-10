@@ -218,11 +218,6 @@ proc guiLoop*() =
   SetWindowSize(screenWidth, screenHeight)
   SetWindowTitle("L-Systems")
   MaximizeWindow()
-
-  var mousePos = Vector2(x: 0, y: 0)
-  var windowPos = Vector2(x: screenWidth.float64, y: screenHeight.float64)
-  var panOffset = mousePos
-
   SetTargetFPS(60)
 
   # Control variables
@@ -230,8 +225,8 @@ proc guiLoop*() =
   var restartSimulation = false
   var clearForest = false
   var restartButton = false
-  var magnitude: float64 = 10
-  var angle: float64 = 30
+  var magnitude: int = 10
+  var angle: int = 30
   var iterations = 2
 
   var startingPosition_x: float32 = screenWidth/2
@@ -259,31 +254,31 @@ proc guiLoop*() =
     restartSimulation = GuiButton(Rectangle(x: 0.float32, y: 20.float32, width: 100.float32, height: 20.float32), "Restart".cstring)
     clearForest = GuiButton(Rectangle(x: 0.float32, y: 40.float32, width: 100.float32, height: 20.float32), "Clear".cstring)
 
-    GuiValueBox(bounds=Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32),
+    let iterationsBox = Rectangle(x: 0.float32, y: 60.float32, width: 100.float32, height: 20.float32)
+    let magnitudeBox = Rectangle(x: 0.float32, y: 80.float32, width: 100.float32, height: 20.float32)
+    let angleBox = Rectangle(x: 0.float32, y: 100.float32, width: 100.float32, height: 20.float32)
+    let mouseVector = Vector2(x: GetMouseX().float64, y: GetMouseY().float64)
+
+    GuiValueBox(bounds=iterationsBox,
                 text="Iterations",
                 value=iterations.addr,
                 minValue=1,
                 maxValue=15,
-                editMode=true)
+                editMode=CheckCollisionPointRec(mouseVector, iterationsBox))
 
-    magnitude = GuiSliderBar(Rectangle(
-                                    x: 0.float32,
-                                    y: 100.float32,
-                                    width: 80.float32,
-                                    height: 20.float32),
-                                    "Smaller",
-                                    "Larger",
-                                    magnitude,
-                                    10, 100)
+    GuiValueBox(bounds=magnitudeBox,
+                text="Size",
+                value=magnitude.addr,
+                minValue=1,
+                maxValue=100,
+                editMode=CheckCollisionPointRec(mouseVector, magnitudeBox))
 
-    angle = GuiSliderBar(Rectangle(x: 0.float32,
-                                   y: 120.float32,
-                                   width: 80.float32,
-                                   height: 20.float32),
-                                  "Narrower",
-                                  "Wider",
-                                   angle,
-                                   1, 360)
+    GuiValueBox(bounds=angleBox,
+                text="Angle",
+                value=angle.addr,
+                minValue=1,
+                maxValue=360,
+                editMode=CheckCollisionPointRec(mouseVector, angleBox))
 
     if IsKeyDown(KEY_DOWN) and IsKeyDown(KEY_LEFT_CONTROL):
       zoom -= 0.01
@@ -313,19 +308,16 @@ proc guiLoop*() =
     camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
 
     if IsKeyDown(KEY_LEFT_CONTROL) and IsMouseButtonPressed(MOUSE_LEFT_BUTTON):
-      startingPosition_x = GetMouseX().float32
-      startingPosition_y = GetMouseY().float32
-
-      let newPositionVector = GetScreenToWorld2D(Vector2(x: startingPosition_x, y: startingPosition_y), camera)
+      let newPositionVector = GetScreenToWorld2D(Vector2(x: mouseVector.x, y: mouseVector.y), camera)
       let newPosition = StartingPosition(x: newPositionVector.x, y: newPositionVector.y, angle: 90)
 
       # Store the location of the tree and its starting attributes
       treeLocations &= @[TreeLocation(startingPosition: newPosition,
-                                      iterationAngle: angle,
+                                      iterationAngle: angle.float32,
                                       iterationNumber: iterations,
-                                      startingMagnitude: magnitude)]
+                                      startingMagnitude: magnitude.float64)]
 
-      let newInstructions = toSeq(axiomToInstructions(iterations, magnitude, angle))
+      let newInstructions = toSeq(axiomToInstructions(iterations, magnitude.float64, angle.float64))
       drawLinesList &= @[executeProgram(newInstructions, newPosition)]
 
     if restartSimulation:

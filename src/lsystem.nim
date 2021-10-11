@@ -273,7 +273,7 @@ proc guiLoop*() =
                 text="Size".cstring,
                 value=magnitude.addr,
                 minValue=1,
-                maxValue=100,
+                maxValue=500,
                 editMode=CheckCollisionPointRec(mouseVector, magnitudeBox))
 
     GuiValueBox(bounds=angleBox,

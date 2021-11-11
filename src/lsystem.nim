@@ -35,15 +35,18 @@ proc rewrite(terms: Terms, maxIterations: int) : Terms =
   for _ in repeat(0, maxIterations):
     currentTerms = @[LineTerm] & currentTerms
   return currentTerms
+
+type PolarCoord = object
+  angle: float64
+  magnitude: float64
     
 type StackControl = enum Push, Pop
 
 # An intruction along with a change in angle and magnitude (i.e. a vector)
 type DrawInstruction = object
-  angle_change: float64
   width: float64
-  magnitude: float64
   color: Color
+  coord: PolarCoord
 
 type 
   InstructionKind = enum pkDraw, pkStack
@@ -54,7 +57,7 @@ type
 
 proc `$` (i: Instruction): string =
   case i.kind:
-    of pkDraw: return "angle_change = " & $i.drawInstruction.angle_change & ", magnitude = " & $i.drawInstruction.magnitude
+    of pkDraw: return "angle_change = " & $i.drawInstruction.coord.angle & ", magnitude = " & $i.drawInstruction.coord.magnitude
     of pkStack: return "direction = " & $i.stackInstruction
 
 iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: float64, leafColor: Color = DARKGREEN) : Instruction =
@@ -67,7 +70,7 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
   var current_magnitude = magnitude
   var current_width: float64 = widths[0]
   # axiom
-  yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(angle_change: 180, magnitude: magnitude))
+  yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(coord: PolarCoord(angle: 180, magnitude: magnitude)))
 
   for term in termsToConvert:
     # TODO make this definable by the grammar and/or tweakable
@@ -81,12 +84,31 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
         # TODO make this definable by the grammar and/or tweakable
         currentLeafColor.r += (sample(@[5, 2, 10, -1, -2, 3]).uint8)
 
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: angle_delta, magnitude: magnitudes[0]))
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: 0, magnitude: -magnitudes[0])) # hack
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: currentLeafColor, width: leaf_width, angle_change: -(angle_delta*2), magnitude: magnitudes[0]))
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: currentLeafColor,
+                                            width: leaf_width,
+                                            coord: PolarCoord(angle: angle_delta, magnitude: magnitudes[0])))
+
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: currentLeafColor,
+                                            width: leaf_width,
+                                            coord: PolarCoord(angle: 0, magnitude: -magnitudes[0]))) # hack
+
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: currentLeafColor,
+                                            width: leaf_width,
+                                            coord: PolarCoord(angle: -(angle_delta*2),
+                                            magnitude: magnitudes[0])))
       of LineTerm:
         # Draw without changing direction
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: 0, magnitude: magnitudes[0]))
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: DARKBROWN,
+                                            width: current_width,
+                                            coord: PolarCoord(angle: 0, magnitude: magnitudes[0])))
 
       # L-systems don't go "backwards"
       # So you can go left or right on the x-axis at a given angle delta
@@ -94,12 +116,23 @@ iterator axiomToInstructions(maxIterations: int, magnitude: float64, angle: floa
         # TODO make this definable by the grammar and/or tweakable
         current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.10]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: angle_delta, magnitude: current_magnitude))
+
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: DARKBROWN,
+                                            width: current_width,
+                                            coord: PolarCoord(angle: angle_delta, magnitude: current_magnitude)))
+
       of GoRight:
         # TODO make this definable by the grammar and/or tweakable
         current_magnitude = current_magnitude - (current_magnitude * sample(@[0.05, 0.01]))
         current_width = current_width - (current_width * sample(@[0.15, 0.10]))
-        yield Instruction(kind: pkDraw, drawInstruction: DrawInstruction(color: DARKBROWN, width: current_width, angle_change: -angle_delta, magnitude: current_magnitude))
+
+        yield Instruction(kind: pkDraw,
+                          drawInstruction:
+                            DrawInstruction(color: DARKBROWN,
+                                            width: current_width,
+                                            coord: PolarCoord(angle: -angle_delta, magnitude: current_magnitude)))
 
       # Control the stack of saved positions
       of PushTerm:
@@ -145,21 +178,32 @@ type DrawLine = object
 proc `$` (d: DrawLine): string =
   return "start_pos = " & $d.start_pos & ", " & "end_pos = " & $d.end_pos
 
+proc polarToCartesian(coord: PolarCoord): Vector2 =
+  # Convert from polar coordinates to cartesian
+  # angle is in degrees
+  let new_x = -(coord.magnitude * cos(degToRad(coord.angle)))
+  let new_y = coord.magnitude * sin(degToRad(coord.angle))
+
+  return Vector2(x: new_x, y: new_y)
+
+proc cartesianToPolar(start_pos: Vector2, end_pos: Vector2):  PolarCoord =
+  # Convert from cartesian coordinates to polar
+  # angle is in degrees
+
+  let magnitude = sqrt((end_pos.y - start_pos.y)^2 + (end_pos.x - start_pos.x)^2)
+  let angle = radToDeg(arcsin(end_pos.y / magnitude))
+
+  return PolarCoord(magnitude: magnitude, angle: angle)
+
 proc calculateNextLine(inst: DrawInstruction, pos: StartingPosition) : DrawLine =
   # Change the angle
-  let new_angle = inst.angle_change + pos.angle
-
-  # Use the same magnitude as before
-  let magnitude = inst.magnitude
-
-  # Convert from polar coordinates to cartesian
-  let new_x = -(magnitude * cos(degToRad(new_angle)))
-  let new_y = magnitude * sin(degToRad(new_angle))
+  let new_angle = inst.coord.angle + pos.angle
+  let endPosition = polarToCartesian(PolarCoord(magnitude: inst.coord.magnitude, angle: new_angle))
 
   result.start_pos = Vector2(x: pos.x, y: pos.y)
 
   # Ending position is relative to the starting position, so add the coordinates
-  result.end_pos = Vector2(x: result.start_pos.x+new_x, y: result.start_pos.y+new_y)
+  result.end_pos = Vector2(x: result.start_pos.x+endPosition.x, y: result.start_pos.y+endPosition.y)
   result.mid_pos = Vector2(x: result.start_pos.x, y: result.end_pos.y)
 
   result.width = inst.width
@@ -243,6 +287,8 @@ proc guiLoop*() =
   var color: Color = DARKGREEN
 
   var camera: Camera2D
+
+  #var testTexture = LoadTextureFromImage(LoadImage("./test_texture.png"))
 
   camera.offset = Vector2(x: camera_x_offset, y: camera_y_offset)
   camera.target = Vector2(x: screenWidth/2, y: screenHeight/2)

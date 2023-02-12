@@ -1,6 +1,21 @@
 #! /usr/bin/env bash
 
-# Run from raygui/src
-mv raygui.h raygui.c # Needed to compile as a shared library or else GCC won't expose symbols
-gcc -shared -fPIC -DRAYGUIDEF -DRAYGUI_IMPLEMENTATION -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 raygui.c -o raygui.so
-mv raygui.c raygui.h
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/wes/code/lsystem/raylib/raylib:/home/wes/code/lsystem
+export LIBRARY_PATH=$LD_LIBRARY_PATH:/home/wes/code/lsystem/raylib/raylib:/home/wes/code/lsystem
+cd raylib
+git fetch
+cmake -DBUILD_SHARED_LIBS=ON .
+make clean || true
+export PLATFORM=PLATFORM_DESKTOP
+export RAYLIB_LIBTYPE=SHARED
+make
+sudo ldconfig
+cd ../
+
+rm -f raygui/raygui.so
+rm -f raygui.so
+cd raygui && git fetch
+gcc -L./raylib/raylib -o raygui.so src/raygui.c -shared -fpic -DRAYGUI_IMPLEMENTATION -lGL -lm -lpthread -ldl -lrt -lX11 -lraylib
+cp ./src/raygui.h ./src/raygui.c
+cp raygui.so ../
+sudo cp raygui.so /usr/lib/raygui.so
